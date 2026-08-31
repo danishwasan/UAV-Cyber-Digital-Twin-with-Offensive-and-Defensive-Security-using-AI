@@ -76,6 +76,43 @@ Include with pipeline scope **all**.
 
 ---
 
+## Verified on hardware
+
+All ten scenarios were run end-to-end against a live PX4 + Gazebo Physical Twin
+(one full shared-mission flight each) and confirmed to **fly, inject, and label**
+correctly. What each injects and the effect observed in the recorded physical
+CSV:
+
+| Scenario | Injected (per attack window) | Observed physical effect |
+|----------|------------------------------|--------------------------|
+| `benign` | — | flies the shared plan, `armed≈0.99` |
+| `gps_spoofing` | ~220 `GPS_INPUT` | estimated position pulled off the true path |
+| `disarm_injection` | force-`DISARM` | **motors cut mid-air** — `armed` drops ~0.96 → ~0.5 |
+| `mode_change_land` | `AUTO.LAND` | `custom_mode` → AUTO.LAND, distinct from OFFBOARD |
+| `mission_injection` | rogue mission + `AUTO.MISSION` | `custom_mode` → AUTO.MISSION |
+| `command_flood_dos` | ~380k `COMMAND_LONG`/HB | heavy network flood; flight continues |
+| `rc_override` | ~220 `MANUAL_CONTROL` | **no physical effect — see note** |
+| `param_injection` | `PARAM_SET` ×3 safety params | network-only (config tamper), no immediate P |
+| `mode_change_rtl` | `AUTO.RTL` | `custom_mode` → AUTO.RTL |
+| `heartbeat_spoof` | ~2.4k spoofed GCS heartbeats | network-only; flight continues |
+| `takeoff_injection` | force-arm + `AUTO.TAKEOFF` | injects; limited (vehicle already airborne) |
+
+> **⚠️ `rc_override` note.** PX4 ignores `MANUAL_CONTROL` while the vehicle is in
+> OFFBOARD mode, which the shared-mission pilot holds throughout the run. The
+> stick-hijack packets are therefore injected and network-visible (**N**), and
+> the window is labeled, but they produce **no kinematic (P) effect** on this
+> flight profile. Treat `rc_override` as an **N-dominant** case here, not
+> `[PNT]`, unless the attack is first extended to hijack the flight mode to a
+> manual mode (STABILIZED / POSCTL) so the sticks take effect.
+
+The three **N-dominant** cases (`command_flood_dos`, `param_injection`,
+`heartbeat_spoof`, plus `rc_override` per the note) show their signature in the
+**network** dataset, so record them with network capture on
+(`./run_dashboard.sh`, or the orchestrator with `sudo` primed) — a
+physical-only run will not reveal their effect.
+
+---
+
 ## Defense roadmap (next phase)
 
 | Layer | Targets | Depends on cases |

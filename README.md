@@ -588,6 +588,21 @@ Live training / reload is also available from the dashboard (`/api/train`) when 
 
 See [CASE_STUDIES.md](uav-cyber-ml/CASE_STUDIES.md) for hypotheses and P/N/T (Physical / Network / Twin) effects.
 
+> All scenarios below have been run end-to-end against a live PX4 + Gazebo
+> Physical Twin and confirmed to fly, inject, and label. The
+> [Verified on hardware](uav-cyber-ml/CASE_STUDIES.md#verified-on-hardware)
+> table records exactly what each one injects and the effect observed — read it
+> before relying on a scenario, especially the `rc_override` note (no physical
+> effect under OFFBOARD) and the network-dominant cases (`command_flood_dos`,
+> `param_injection`, `heartbeat_spoof`), which need network capture on to show
+> their signature.
+
+Run your first attack (a full flight, dataset written to `datasets/runs/gps_spoofing/`):
+
+```bash
+python orchestrator.py --scenarios gps_spoofing --runs 1
+```
+
 <details open>
 <summary><strong>Tier A — core pipeline</strong> (<code>--scope core</code>)</summary>
 
